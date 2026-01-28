@@ -1,0 +1,92 @@
+name: Deploy XCircle Digital COO
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Production Server
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install Dependencies (Validation)
+        run: |
+          npm ci || npm install
+          
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🚀 Starting XCircle Digital COO Deployment..."
+            
+            # Navigate to project directory
+            cd ~/clawdbot || mkdir -p ~/clawdbot && cd ~/clawdbot
+            
+            # Backup existing files
+            if [ -f "index.js" ]; then
+              cp index.js index.js.backup.$(date +%Y%m%d_%H%M%S)
+            fi
+            
+            # Pull latest code
+            if [ -d ".git" ]; then
+              git pull origin main || git pull origin master
+            else
+              git clone https://github.com/${{ github.repository }}.git .
+            fi
+            
+            # Create necessary directories
+            mkdir -p logs modules .wwebjs_auth
+            
+            # Install dependencies
+            npm install
+            
+            # Create .env if not exists
+            if [ ! -f ".env" ]; then
+              cp .env.example .env 2>/dev/null || echo "No .env.example found"
+            fi
+            
+            # Restart PM2 process
+            pm2 describe XCircle-COO > /dev/null 2>&1
+            if [ $? -eq 0 ]; then
+              echo "♻️ Restarting existing PM2 process..."
+              pm2 restart XCircle-COO
+            else
+              echo "🆕 Starting new PM2 process..."
+              pm2 start index.js --name "XCircle-COO"
+            fi
+            
+            # Save PM2 configuration
+            pm2 save
+            
+            # Show status
+            pm2 list
+            
+            echo "✅ Deployment completed successfully!"
+            
+      - name: Verify Deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo "🔍 Verifying deployment..."
+            pm2 list | grep XCircle-COO
+            echo "📊 Process Info:"
+            pm2 info XCircle-COO | head -20
+            echo "✅ Verification complete!"
