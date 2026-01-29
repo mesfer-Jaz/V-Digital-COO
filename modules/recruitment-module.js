@@ -14,7 +14,14 @@ const Anthropic = require('@anthropic-ai/sdk');
 class RecruitmentModule {
     constructor(config) {
         this.config = config;
-        this.anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+        
+        // Initialize AI client only if API key is available
+        if (config.ANTHROPIC_API_KEY) {
+            this.anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+        } else {
+            console.log('⚠️ Anthropic not configured in RecruitmentModule');
+            this.anthropic = null;
+        }
         this.braveApiKey = config.BRAVE_API_KEY;
         this.zaiApiKey = config.ZAI_API_KEY;
     }

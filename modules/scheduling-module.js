@@ -15,25 +15,35 @@ class SchedulingModule {
     constructor(config) {
         this.config = config;
 
-        // Initialize Google Calendar API
-        this.auth = new google.auth.GoogleAuth({
-            keyFile: config.GOOGLE_SERVICE_ACCOUNT_JSON,
-            scopes: ['https://www.googleapis.com/auth/calendar']
-        });
+        // Initialize Google Calendar API only if service account is available
+        if (config.GOOGLE_SERVICE_ACCOUNT_JSON) {
+            this.auth = new google.auth.GoogleAuth({
+                keyFile: config.GOOGLE_SERVICE_ACCOUNT_JSON,
+                scopes: ['https://www.googleapis.com/auth/calendar']
+            });
+            this.calendar = null;
+            this.initializeCalendar();
+        } else {
+            console.log('⚠️ Google Calendar not configured - scheduling features disabled');
+            this.auth = null;
+            this.calendar = null;
+        }
 
-        this.calendar = null;
-        this.initializeCalendar();
-
-        // Email transporter for meeting invites
-        this.emailTransporter = nodemailer.createTransport({
-            host: config.EMAIL_HOST,
-            port: parseInt(config.EMAIL_PORT),
-            secure: true,
-            auth: {
-                user: config.EMAIL_USER,
-                pass: config.EMAIL_PASS.replace(/"/g, '')
-            }
-        });
+        // Email transporter for meeting invites - only if email config is available
+        if (config.EMAIL_HOST && config.EMAIL_USER && config.EMAIL_PASS) {
+            this.emailTransporter = nodemailer.createTransport({
+                host: config.EMAIL_HOST,
+                port: parseInt(config.EMAIL_PORT || '465'),
+                secure: true,
+                auth: {
+                    user: config.EMAIL_USER,
+                    pass: (config.EMAIL_PASS || '').replace(/"/g, '')
+                }
+            });
+        } else {
+            console.log('⚠️ Email not configured in SchedulingModule');
+            this.emailTransporter = null;
+        }
     }
 
     async initializeCalendar() {

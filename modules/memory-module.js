@@ -16,17 +16,27 @@ const Anthropic = require('@anthropic-ai/sdk');
 class MemoryModule {
     constructor(config) {
         this.config = config;
-        this.anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+        
+        // Initialize AI client only if API key is available
+        if (config.ANTHROPIC_API_KEY) {
+            this.anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+        }
         this.supermemoryApiKey = config.SUPERMEMORY_API_KEY;
         this.supermemoryWorkspaceId = config.SUPERMEMORY_WORKSPACE_ID;
 
-        // Initialize Telegram bot
-        this.telegramBot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
-        this.setupTelegramHandlers();
+        // Initialize Telegram bot only if token is available
+        if (config.TELEGRAM_BOT_TOKEN) {
+            this.telegramBot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+            this.setupTelegramHandlers();
+        } else {
+            console.log('⚠️ Telegram not configured in MemoryModule');
+            this.telegramBot = null;
+        }
 
         // Initialize WhatsApp client (Baileys)
         this.whatsappClient = null;
-        this.initializeWhatsApp();
+        // Disable WhatsApp in memory module to avoid conflicts
+        // this.initializeWhatsApp();
 
         // Memory store for session data
         this.memoryStore = new Map();

@@ -19,21 +19,32 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 class FinancialSuite {
     constructor(config) {
         this.config = config;
-        this.anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
-        this.genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
+        
+        // Initialize AI clients only if API keys are available
+        if (config.ANTHROPIC_API_KEY) {
+            this.anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+        }
+        if (config.GOOGLE_API_KEY) {
+            this.genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
+        }
         this.drive = google.drive('v3');
         this.sheets = google.sheets('v4');
         
-        // Initialize email transporter
-        this.emailTransporter = nodemailer.createTransport({
-            host: config.EMAIL_HOST,
-            port: parseInt(config.EMAIL_PORT),
-            secure: true,
-            auth: {
-                user: config.EMAIL_USER,
-                pass: config.EMAIL_PASS.replace(/"/g, '')
-            }
-        });
+        // Initialize email transporter only if email config is available
+        if (config.EMAIL_HOST && config.EMAIL_USER && config.EMAIL_PASS) {
+            this.emailTransporter = nodemailer.createTransport({
+                host: config.EMAIL_HOST,
+                port: parseInt(config.EMAIL_PORT || '465'),
+                secure: true,
+                auth: {
+                    user: config.EMAIL_USER,
+                    pass: (config.EMAIL_PASS || '').replace(/"/g, '')
+                }
+            });
+        } else {
+            console.log('⚠️ Email not configured - email features disabled');
+            this.emailTransporter = null;
+        }
 
         // Google Auth
         this.auth = new google.auth.GoogleAuth({
