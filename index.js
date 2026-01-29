@@ -10,7 +10,9 @@
  * - Multi-channel support (Telegram + WhatsApp via Baileys)
  */
 
+// 1. Load environment variables immediately
 require('dotenv').config();
+
 const { Telegraf } = require('telegraf');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -32,7 +34,7 @@ const MemoryModule = require('./modules/memory-module');
 const config = {
     // Identity & Access
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
-    ALLOWED_TELEGRAM_USER_IDS: parseInt(process.env.ALLOWED_TELEGRAM_USER_IDS),
+    ALLOWED_TELEGRAM_USER_IDS: parseInt(process.env.ALLOWED_TELEGRAM_USER_IDS || '0'),
     WHATSAPP_SESSION_ID: process.env.WHATSAPP_SESSION_ID || 'xcircle-coo',
     FOUNDER_WHATSAPP_NUMBER: process.env.FOUNDER_WHATSAPP_NUMBER || '+966550746064',
     COMPANY_NAME: process.env.COMPANY_NAME || 'XCircle',
@@ -115,9 +117,27 @@ function getActiveEngine() {
 
 // ==================== LLM CLIENTS ====================
 
-const groq = new Groq({ apiKey: config.GROQ_API_KEY });
-const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
-const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
+// Initialize clients with safety checks
+let groq = null;
+if (config.GROQ_API_KEY) {
+    groq = new Groq({ apiKey: config.GROQ_API_KEY });
+} else {
+    console.warn('⚠️ GROQ_API_KEY is missing. Groq engine will be disabled.');
+}
+
+let anthropic = null;
+if (config.ANTHROPIC_API_KEY) {
+    anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
+} else {
+    console.warn('⚠️ ANTHROPIC_API_KEY is missing. Claude engine will be disabled.');
+}
+
+let genAI = null;
+if (config.GOOGLE_API_KEY) {
+    genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
+} else {
+    console.warn('⚠️ GOOGLE_API_KEY is missing. Gemini engine will be disabled.');
+}
 
 // ==================== MODULE INITIALIZATION ====================
 
@@ -128,7 +148,14 @@ const memoryModule = new MemoryModule(config);
 
 // ==================== BOT INITIALIZATION ====================
 
-const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+let bot = null;
+if (config.TELEGRAM_BOT_TOKEN) {
+    bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+    console.log('✅ Telegram bot initialized');
+} else {
+    console.error('❌ TELEGRAM_BOT_TOKEN is missing. Telegram bot will not start.');
+}
+
 let whatsappClient = null;
 let whatsappReady = false;
 
@@ -138,6 +165,7 @@ let whatsappReady = false;
  * Save message to Supermemory
  */
 async function saveToSupermemory(content, source, userId, messageType = 'message') {
+    if (!config.SUPERMEMORY_API_KEY) return null;
     try {
         const timestamp = new Date().toISOString();
         const document = {
@@ -228,8 +256,8 @@ async function initializeWhatsApp() {
 async function handleWhatsAppMessage(message) {
     try {
         // Only respond to founder
-        const founderPhoneNumber = process.env.FOUNDER_WHATSAPP_NUMBER;
-        if (founderPhoneNumber && !message.from.includes(founderPhoneNumber)) {
+        const founderPhoneNumber = config.FOUNDER_WHATSAPP_NUMBER;
+        if (founderPhoneNumber && !message.from.includes(founderPhoneNumber.replace('+', ''))) {
             return;
         }
 
@@ -282,6 +310,7 @@ async function handleWhatsAppMessage(message) {
 // ==================== LLM FUNCTIONS ====================
 
 async function callGroq(prompt, systemMessage = SYSTEM_PROMPT) {
+    if (!groq) return "⚠️ Groq engine is not configured.";
     try {
         const chatCompletion = await groq.chat.completions.create({
             messages: [
@@ -292,246 +321,93 @@ async function callGroq(prompt, systemMessage = SYSTEM_PROMPT) {
         });
         return chatCompletion.choices[0].message.content;
     } catch (error) {
-        console.error('Groq error:', error);
-        throw error;
+        console.error('Groq API error:', error);
+        return '❌ عذراً، حدث خطأ في محرك Groq.';
     }
 }
 
 async function callClaude(prompt, systemMessage = SYSTEM_PROMPT) {
+    if (!anthropic) return await callGroq(prompt, systemMessage);
     try {
-        const msg = await anthropic.messages.create({
+        const message = await anthropic.messages.create({
             model: config.ANTHROPIC_MODEL,
             max_tokens: 4096,
             system: systemMessage,
             messages: [{ role: 'user', content: prompt }],
         });
-        return msg.content[0].text;
+        return message.content[0].text;
     } catch (error) {
-        console.error('Claude error:', error);
-        throw error;
+        console.error('Claude API error:', error);
+        return await callGroq(prompt, systemMessage);
     }
 }
 
-async function callGemini(prompt, fileData = null) {
-    try {
-        const model = genAI.getGenerativeModel({ model: config.GOOGLE_MODEL });
-        const fullPrompt = `${SYSTEM_PROMPT}\n\nالسؤال: ${prompt}`;
-        
-        if (fileData) {
-            const result = await model.generateContent([fullPrompt, fileData]);
-            return result.response.text();
+// ==================== TELEGRAM HANDLERS ====================
+
+if (bot) {
+    bot.start((ctx) => {
+        ctx.reply(`مرحباً بك في XCircle Digital COO. أنا مساعدك التنفيذي الذكي. كيف يمكنني مساعدتك اليوم يا أستاذ ${config.FOUNDER_NAME}؟`);
+    });
+
+    bot.on('text', async (ctx) => {
+        // Check user ID
+        if (config.ALLOWED_TELEGRAM_USER_IDS && ctx.from.id !== config.ALLOWED_TELEGRAM_USER_IDS) {
+            return ctx.reply('⚠️ عذراً، هذا البوت مخصص للاستخدام الداخلي فقط.');
         }
-        
-        const result = await model.generateContent(fullPrompt);
-        return result.response.text();
-    } catch (error) {
-        console.error('Gemini error:', error);
-        throw error;
-    }
-}
 
-// ==================== MIDDLEWARE ====================
-
-bot.use(async (ctx, next) => {
-    if (ctx.from && ctx.from.id !== config.ALLOWED_TELEGRAM_USER_IDS) {
-        return ctx.reply('عذراً، الوصول مقتصر على المستخدم المصرح له فقط.');
-    }
-    return next();
-});
-
-// ==================== COMMAND HANDLERS ====================
-
-bot.start((ctx) => {
-    const engine = getActiveEngine();
-    ctx.reply(`مرحباً مسفر، الموظف الرقمي التنفيذي (Digital COO) لاكس سيركل جاهز للخدمة.
-    
-🕐 الوقت الحالي (الرياض): ${engine.riyadhHour}:00
-⚙️ المحرك النشط: ${engine.primary}
-🔍 أداة البحث: ${engine.agentic}
-💾 Supermemory: ✅ مفعل
-📱 WhatsApp: ${whatsappReady ? '✅ متصل' : '⏳ جاري الاتصال'}
-
-الأوامر المتاحة:
-/help - عرض جميع الأوامر
-/invoice - إنشاء فاتورة
-/schedule - جدولة اجتماع
-/search - البحث في السوق
-/recruit - البحث عن مواهب
-/memory - إدارة الذاكرة المؤسسية
-/report - إنشاء تقرير
-    `);
-
-    // Save to Supermemory
-    saveToSupermemory(
-        `Bot started by ${ctx.from.first_name}`,
-        'telegram',
-        ctx.from.id,
-        'bot_start'
-    );
-});
-
-bot.command('help', (ctx) => {
-    ctx.reply(`📋 قائمة الأوامر المتاحة:
-
-💰 **الوحدة المالية:**
-/invoice - إنشاء فاتورة
-/quotation - إنشاء عرض سعر
-/letterhead - إنشاء رسالة رسمية
-/accounting - إرسال ملخص محاسبي
-
-📅 **وحدة الجدولة:**
-/schedule - جدولة اجتماع
-/availability - التحقق من التوفر
-/events - عرض الأحداث
-
-👥 **وحدة التوظيف:**
-/recruit - البحث عن مواهب
-/market - تحليل السوق
-/competitors - تحليل المنافسين
-/vc - تتبع نشاط رأس المال الجريء
-
-💾 **وحدة الذاكرة:**
-/save - حفظ في الذاكرة
-/search - البحث في الذاكرة
-/recall - استرجاع وثيقة
-
-📊 **التقارير:**
-/report - إنشاء تقرير
-/summary - ملخص تنفيذي
-/stats - إحصائيات النظام
-    `);
-});
-
-// ==================== TEXT MESSAGE HANDLER ====================
-
-bot.on('text', async (ctx) => {
-    const text = ctx.message.text;
-    const engine = getActiveEngine();
-
-    try {
-        await ctx.sendChatAction('typing');
+        const text = ctx.message.text;
+        const engine = getActiveEngine();
 
         // Save to Supermemory
         await saveToSupermemory(
             `Telegram: ${text}`,
             'telegram',
-            ctx.from.id,
+            ctx.from.id.toString(),
             'telegram_message'
         );
 
-        let response;
+        let response = '';
 
-        if (text.includes('فاتورة') || text.includes('invoice')) {
-            response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
-        } else if (text.includes('اجتماع') || text.includes('meeting')) {
-            response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
-        } else if (text.includes('ابحث') || text.includes('سوق')) {
-            response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
-        } else if (text.includes('مواهب') || text.includes('recruit')) {
-            response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
-        } else if (text.includes('حفظ') || text.includes('save')) {
-            const content = text.replace(/حفظ|save/gi, '').trim();
-            const docId = await memoryModule.saveToMemory(content, 'telegram', ctx.from.id);
-            response = `✓ تم حفظ الوثيقة بنجاح (ID: ${docId})`;
-        } else if (text.toLowerCase().includes('code') || text.includes('برمج')) {
-            response = await callClaude(text);
-        } else if (text.length > 500 || text.includes('تحليل')) {
-            response = await callGemini(text);
-        } else {
-            response = engine.isPeakTime ? await callClaude(text) : await callGroq(text);
+        try {
+            // Command routing
+            if (text.includes('فاتورة') || text.includes('invoice')) {
+                response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
+            } else if (text.includes('اجتماع') || text.includes('meeting')) {
+                response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
+            } else {
+                response = await (engine.isPeakTime ? callClaude(text) : callGroq(text));
+            }
+
+            // Save response to Supermemory
+            await saveToSupermemory(
+                `Response: ${response}`,
+                'telegram',
+                ctx.from.id.toString(),
+                'telegram_response'
+            );
+
+            await ctx.reply(response);
+
+        } catch (error) {
+            console.error('Telegram handling error:', error);
+            ctx.reply('❌ حدث خطأ في معالجة طلبك.');
         }
+    });
 
-        // Save response to Supermemory
-        await saveToSupermemory(
-            `Response: ${response}`,
-            'telegram',
-            ctx.from.id,
-            'telegram_response'
-        );
-
-        await ctx.reply(response);
-
-    } catch (error) {
-        console.error('Text handler error:', error);
-        ctx.reply('❌ عذراً، حدث خطأ أثناء معالجة طلبك. يرجى المحاولة لاحقاً.');
-    }
-});
-
-// ==================== ERROR HANDLING ====================
-
-bot.catch((err, ctx) => {
-    console.error('Bot error:', err);
-    ctx.reply('❌ حدث خطأ غير متوقع. يرجى المحاولة لاحقاً.');
-});
-
-// ==================== GRACEFUL SHUTDOWN ====================
-
-process.once('SIGINT', async () => {
-    console.log('\n⏹️ Shutting down bot...');
-    await bot.stop('SIGINT');
-    if (whatsappClient) {
-        await whatsappClient.destroy();
-    }
-    process.exit(0);
-});
-
-process.once('SIGTERM', async () => {
-    console.log('\n⏹️ Shutting down bot...');
-    await bot.stop('SIGTERM');
-    if (whatsappClient) {
-        await whatsappClient.destroy();
-    }
-    process.exit(0);
-});
-
-// ==================== BOT LAUNCH ====================
-
-async function startBot() {
-    try {
-        // Launch Telegram bot
-        await bot.launch({ dropPendingUpdates: true });
-        console.log('✅ Telegram bot launched successfully');
-
-        // Initialize WhatsApp
-        await initializeWhatsApp();
-
-        // Log active configuration
-        const engine = getActiveEngine();
-        console.log(`
-╔════════════════════════════════════════╗
-║   XCircle Digital COO - Active Config  ║
-╠════════════════════════════════════════╣
-║ Company: ${config.COMPANY_NAME}
-║ Founder: ${config.FOUNDER_NAME}
-║ Primary Engine: ${engine.primary}
-║ Agentic Tool: ${engine.agentic}
-║ Time Window: ${engine.timeWindow}
-║ Riyadh Hour: ${engine.riyadhHour}:00
-║ Supermemory: ✅ ACTIVATED
-║ WhatsApp: 🔄 INITIALIZING
-╚════════════════════════════════════════╝
-        `);
-
-    } catch (error) {
-        console.error('Bot startup error:', error);
-        process.exit(1);
-    }
+    bot.launch();
+    console.log('🚀 Telegram bot launched!');
 }
 
-// ==================== START ====================
+// ==================== STARTUP ====================
 
-startBot().catch(error => {
-    console.error('Fatal error:', error);
-    process.exit(1);
+initializeWhatsApp();
+
+// Handle graceful shutdown
+process.once('SIGINT', () => {
+    if (bot) bot.stop('SIGINT');
+    process.exit(0);
 });
-
-module.exports = {
-    bot,
-    whatsappClient,
-    getActiveEngine,
-    financialSuite,
-    schedulingModule,
-    recruitmentModule,
-    memoryModule,
-    saveToSupermemory
-};
+process.once('SIGTERM', () => {
+    if (bot) bot.stop('SIGTERM');
+    process.exit(0);
+});
