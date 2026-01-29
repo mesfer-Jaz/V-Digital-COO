@@ -10,8 +10,9 @@
  * - Multi-channel support (Telegram + WhatsApp via Baileys)
  */
 
-// 1. Load environment variables immediately
-require('dotenv').config();
+// 1. Load environment variables immediately with absolute path
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const { Telegraf } = require('telegraf');
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -149,11 +150,15 @@ const memoryModule = new MemoryModule(config);
 // ==================== BOT INITIALIZATION ====================
 
 let bot = null;
-if (config.TELEGRAM_BOT_TOKEN) {
-    bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
-    console.log('✅ Telegram bot initialized');
+if (config.TELEGRAM_BOT_TOKEN && config.TELEGRAM_BOT_TOKEN.includes(':')) {
+    try {
+        bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+        console.log('✅ Telegram bot initialized with token:', config.TELEGRAM_BOT_TOKEN.substring(0, 10) + '...');
+    } catch (e) {
+        console.error('❌ Failed to initialize Telegraf:', e.message);
+    }
 } else {
-    console.error('❌ TELEGRAM_BOT_TOKEN is missing. Telegram bot will not start.');
+    console.error('❌ TELEGRAM_BOT_TOKEN is missing or invalid format. Current value:', config.TELEGRAM_BOT_TOKEN);
 }
 
 let whatsappClient = null;
