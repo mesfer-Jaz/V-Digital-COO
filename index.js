@@ -1,3 +1,14 @@
+// 1. Load environment variables FIRST before anything else
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
+// Debug: Log loaded environment variables
+console.log('🔧 Environment loaded from:', path.join(__dirname, '.env'));
+console.log('🔑 TELEGRAM_BOT_TOKEN:', process.env.TELEGRAM_BOT_TOKEN ? process.env.TELEGRAM_BOT_TOKEN.substring(0, 15) + '...' : 'NOT SET');
+console.log('🔑 GROQ_API_KEY:', process.env.GROQ_API_KEY ? 'SET' : 'NOT SET');
+console.log('🔑 ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'SET' : 'NOT SET');
+console.log('🔑 GOOGLE_API_KEY:', process.env.GOOGLE_API_KEY ? 'SET' : 'NOT SET');
+
 /**
  * XCircle Digital COO - Main Bot Engine with WhatsApp Integration
  * 
@@ -10,10 +21,6 @@
  * - Multi-channel support (Telegram + WhatsApp via Baileys)
  */
 
-// 1. Load environment variables immediately with absolute path
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-
 const { Telegraf } = require('telegraf');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -22,7 +29,6 @@ const Groq = require('groq-sdk');
 const Anthropic = require('@anthropic-ai/sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
-const path = require('path');
 
 // Import modules
 const FinancialSuite = require('./modules/financial-suite');
